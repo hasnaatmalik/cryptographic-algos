@@ -368,7 +368,7 @@ def rotor_decrypt(cipher, rotors, initial_pos=None):
     return result, pd.DataFrame(steps), pos
 
 # ====================== STREAMLIT UI ======================
-st.title("🔐 Cryptographic Algorithms Explorer")
+st.title("🔐 Cryptographic Algorithms")
 st.markdown("Explore classical ciphers with encryption, decryption, and step-by-step breakdowns.")
 
 tabs = st.tabs(["Caesar", "Affine", "Vigenère", "Rail Fence", "Row Transposition", "Playfair", "Hill", "Rotor"])
