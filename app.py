@@ -42,26 +42,27 @@ def caesar_decrypt(cipher, shift):
 
 def caesar_steps(ciphertext, shift, mode="decrypt"):
     rows = []
-    text_upper = ciphertext.upper() if mode == "decrypt" else ciphertext.upper()
-    op = - if mode == "decrypt" else +
-    label = "y - shift" if mode == "decrypt" else "x + shift"
+    text_upper = ciphertext.upper()
+    
+    # Choose operation: subtract for decrypt, add for encrypt
+    operation = lambda x, y: (x - y) % 26 if mode == "decrypt" else (x + y) % 26
     start_col = "Cipher" if mode == "decrypt" else "Plain"
     end_col = "Plain" if mode == "decrypt" else "Cipher"
-    start_key = "y" if mode == "decrypt" else "x"
+    label = "y - shift" if mode == "decrypt" else "x + shift"
+    
     for ch in text_upper:
         if ch.isalpha():
             idx = A2I[ch]
-            shifted = op(idx, shift) % 26
+            shifted = operation(idx, shift)
             res_ch = I2A[shifted]
             rows.append({
                 start_col: ch,
-                f"{start_key} (index)": idx,
-                label: op(idx, shift),
+                f"{start_col.lower()[0]} (index)": idx,
+                label: idx - shift if mode == "decrypt" else idx + shift,
                 f"({label}) mod 26": shifted,
                 end_col: res_ch
             })
     return pd.DataFrame(rows) if rows else pd.DataFrame()
-
 # ====================== AFFINE CIPHER ======================
 def affine_encrypt(plaintext: str, a: int, b: int):
     out, rows = [], []
