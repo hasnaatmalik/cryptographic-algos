@@ -3,6 +3,7 @@ import pandas as pd
 import string
 import random
 from math import gcd
+import numpy as np
 
 # ====================== CONFIG & HELPERS ======================
 st.set_page_config(page_title="CryptoLab", page_icon="🔐", layout="wide")
@@ -17,6 +18,13 @@ def mod_inverse(a: int, m: int = 26) -> int:
     except ValueError:
         raise ValueError(f"No modular inverse for a={a} under mod {m}. Must be coprime with 26.")
 
+def matrix_mod_inverse(mat, mod=26):
+    det = int(np.round(np.linalg.det(mat))) % mod
+    det_inv = mod_inverse(det, mod)
+    adj = np.linalg.inv(mat) * np.linalg.det(mat)
+    inv = (det_inv * adj) % mod
+    return inv.astype(int)
+
 # ====================== CAESAR CIPHER ======================
 def caesar_encrypt(text, shift):
     result = ""
@@ -30,22 +38,27 @@ def caesar_encrypt(text, shift):
     return result
 
 def caesar_decrypt(cipher, shift):
-    return caesar_encrypt(cipher, -shift)
+    return caesar_encrypt(cipher, -shift % 26)
 
-def caesar_steps(ciphertext, shift):
+def caesar_steps(ciphertext, shift, mode="decrypt"):
     rows = []
-    cipher_upper = ciphertext.upper()
-    for ch in cipher_upper:
+    text_upper = ciphertext.upper() if mode == "decrypt" else ciphertext.upper()
+    op = - if mode == "decrypt" else +
+    label = "y - shift" if mode == "decrypt" else "x + shift"
+    start_col = "Cipher" if mode == "decrypt" else "Plain"
+    end_col = "Plain" if mode == "decrypt" else "Cipher"
+    start_key = "y" if mode == "decrypt" else "x"
+    for ch in text_upper:
         if ch.isalpha():
-            y = ord(ch) - 65
-            y_minus_k = (y - shift) % 26
-            plain = chr(y_minus_k + 65)
+            idx = A2I[ch]
+            shifted = op(idx, shift) % 26
+            res_ch = I2A[shifted]
             rows.append({
-                "Cipher": ch,
-                "y (index)": y,
-                "y - shift": y - shift,
-                "(y - shift) mod 26": y_minus_k,
-                "Plain": plain
+                start_col: ch,
+                f"{start_key} (index)": idx,
+                label: op(idx, shift),
+                f"({label}) mod 26": shifted,
+                end_col: res_ch
             })
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -82,6 +95,223 @@ def affine_decrypt(ciphertext: str, a: int, b: int):
             out.append(ch)
             rows.append({"Cipher": ch, "y": "-", "y - b": "-", "a⁻¹ × (y - b)": "-", "a⁻¹ × (y - b) mod 26": "-", "Plain": ch})
     return "".join(out), pd.DataFrame(rows)
+
+# ====================== VIGENÈRE CIPHER ======================
+def generate_vigenere_key(text, key):
+    key = key.upper()
+    full_key = (key * (len(text) // len(key) + 1))[:len(text)]
+    return full_key
+
+def vigenere_encrypt(plaintext, key):
+    plaintext = plaintext.upper()
+    full_key = generate_vigenere_key(plaintext, key)
+    out, rows = [], []
+    for p, k in zip(plaintext, full_key):
+        if p.isalpha():
+            shift = A2I[k]
+            c = I2A[(A2I[p] + shift) % 26]
+            out.append(c)
+            rows.append({"Plain": p, "Key": k, "Shift": shift, "p + shift mod 26": (A2I[p] + shift) % 26, "Cipher": c})
+        else:
+            out.append(p)
+            rows.append({"Plain": p, "Key": "-", "Shift": "-", "p + shift mod 26": "-", "Cipher": p})
+    return "".join(out), pd.DataFrame(rows)
+
+def vigenere_decrypt(ciphertext, key):
+    ciphertext = ciphertext.upper()
+    full_key = generate_vigenere_key(ciphertext, key)
+    out, rows = [], []
+    for c, k in zip(ciphertext, full_key):
+        if c.isalpha():
+            shift = A2I[k]
+            p = I2A[(A2I[c] - shift) % 26]
+            out.append(p)
+            rows.append({"Cipher": c, "Key": k, "Shift": shift, "c - shift mod 26": (A2I[c] - shift) % 26, "Plain": p})
+        else:
+            out.append(c)
+            rows.append({"Cipher": c, "Key": "-", "Shift": "-", "c - shift mod 26": "-", "Plain": c})
+    return "".join(out), pd.DataFrame(rows)
+
+# ====================== RAIL FENCE CIPHER ======================
+def rail_fence_encrypt(text, rails):
+    text = ''.join(c for c in text.upper() if c.isalpha())
+    fence = [[''] * len(text) for _ in range(rails)]
+    dir_down, row = True, 0
+    for i, c in enumerate(text):
+        fence[row][i] = c
+        if dir_down:
+            row += 1
+            if row == rails - 1:
+                dir_down = False
+        else:
+            row -= 1
+            if row == 0:
+                dir_down = True
+    cipher = ''.join(c for row in fence for c in row if c)
+    steps_df = pd.DataFrame(fence, index=[f"Rail {i+1}" for i in range(rails)]).T
+    return cipher, steps_df
+
+def rail_fence_decrypt(cipher, rails):
+    cipher = ''.join(c for c in cipher.upper() if c.isalpha())
+    fence = [[''] * len(cipher) for _ in range(rails)]
+    positions = []
+    dir_down, row = True, 0
+    for i in range(len(cipher)):
+        positions.append((row, i))
+        if dir_down:
+            row += 1
+            if row == rails - 1:
+                dir_down = False
+        else:
+            row -= 1
+            if row == 0:
+                dir_down = True
+    idx = 0
+    for r in range(rails):
+        for pos in [p for p in positions if p[0] == r]:
+            fence[r][pos[1]] = cipher[idx]
+            idx += 1
+    plain = ''
+    dir_down, row = True, 0
+    for i in range(len(cipher)):
+        plain += fence[row][i]
+        if dir_down:
+            row += 1
+            if row == rails - 1:
+                dir_down = False
+        else:
+            row -= 1
+            if row == 0:
+                dir_down = True
+    steps_df = pd.DataFrame(fence, index=[f"Rail {i+1}" for i in range(rails)]).T
+    return plain, steps_df
+
+# ====================== ROW TRANSPOSITION CIPHER ======================
+def row_transposition_encrypt(text, key):
+    text = ''.join(c for c in text.upper() if c.isalpha())
+    cols = len(key)
+    rows_num = -(-len(text) // cols)
+    grid = [[''] * cols for _ in range(rows_num)]
+    for i, c in enumerate(text):
+        grid[i // cols][i % cols] = c
+    for _ in range(rows_num * cols - len(text)):
+        grid[-1].append('X')  # Padding with X
+    key_order = sorted(range(cols), key=lambda k: key[k])
+    cipher = ''
+    for col in key_order:
+        for row in grid:
+            if row[col]:
+                cipher += row[col]
+    steps_df = pd.DataFrame(grid, columns=list(key))
+    return cipher, steps_df
+
+def row_transposition_decrypt(cipher, key):
+    cipher = ''.join(c for c in cipher.upper() if c.isalpha())
+    cols = len(key)
+    rows_num = len(cipher) // cols
+    key_order = sorted(range(cols), key=lambda k: key[k])
+    grid = [[''] * cols for _ in range(rows_num)]
+    idx = 0
+    for col in key_order:
+        for r in range(rows_num):
+            grid[r][col] = cipher[idx]
+            idx += 1
+    plain = ''
+    for row in grid:
+        plain += ''.join(row)
+    plain = plain.rstrip('X')
+    steps_df = pd.DataFrame(grid, columns=list(key))
+    return plain, steps_df
+
+# ====================== PLAYFAIR CIPHER ======================
+def playfair_prepare_key(key):
+    key = ''.join(c for c in key.upper() if c.isalpha() and c != 'J').replace('J', 'I')
+    matrix = ''
+    seen = set()
+    for c in key + ALPHA:
+        if c not in seen and c != 'J':
+            seen.add(c)
+            matrix += c
+    return [list(matrix[i:i+5]) for i in range(0, 25, 5)]
+
+def find_pos(matrix, ch):
+    for r, row in enumerate(matrix):
+        if ch in row:
+            return r, row.index(ch)
+    return None
+
+def playfair_encrypt(text, key):
+    matrix = playfair_prepare_key(key)
+    text = ''.join(c for c in text.upper() if c.isalpha()).replace('J', 'I')
+    if len(text) % 2 != 0:
+        text += 'X'
+    pairs = [text[i:i+2] for i in range(0, len(text), 2)]
+    out, rows = '', []
+    for p1, p2 in pairs:
+        if p1 == p2:
+            p2 = 'X'
+        r1, c1 = find_pos(matrix, p1)
+        r2, c2 = find_pos(matrix, p2)
+        if r1 == r2:
+            c1_out, c2_out = (c1 + 1) % 5, (c2 + 1) % 5
+            out += matrix[r1][c1_out] + matrix[r2][c2_out]
+        elif c1 == c2:
+            r1_out, r2_out = (r1 + 1) % 5, (r2 + 1) % 5
+            out += matrix[r1_out][c1] + matrix[r2_out][c2]
+        else:
+            out += matrix[r1][c2] + matrix[r2][c1]
+        rows.append({"Pair": f"{p1}{p2}", "Rule": "Same row/col/rect", "Cipher Pair": out[-2:]})
+    steps_df = pd.DataFrame(rows)
+    return out, steps_df, pd.DataFrame(matrix)
+
+def playfair_decrypt(cipher, key):
+    matrix = playfair_prepare_key(key)
+    pairs = [cipher[i:i+2] for i in range(0, len(cipher), 2)]
+    out, rows = '', []
+    for c1, c2 in pairs:
+        r1, col1 = find_pos(matrix, c1)
+        r2, col2 = find_pos(matrix, c2)
+        if r1 == r2:
+            col1_out, col2_out = (col1 - 1) % 5, (col2 - 1) % 5
+            out += matrix[r1][col1_out] + matrix[r2][col2_out]
+        elif col1 == col2:
+            r1_out, r2_out = (r1 - 1) % 5, (r2 - 1) % 5
+            out += matrix[r1_out][col1] + matrix[r2_out][col2]
+        else:
+            out += matrix[r1][col2] + matrix[r2][col1]
+        rows.append({"Pair": f"{c1}{c2}", "Rule": "Same row/col/rect", "Plain Pair": out[-2:]})
+    steps_df = pd.DataFrame(rows)
+    return out.rstrip('X'), steps_df, pd.DataFrame(matrix)
+
+# ====================== HILL CIPHER ======================
+def hill_encrypt(text, key_matrix):
+    n = key_matrix.shape[0]
+    text = ''.join(c for c in text.upper() if c.isalpha())
+    if len(text) % n != 0:
+        text += 'X' * (n - len(text) % n)
+    out = ''
+    rows = []
+    for i in range(0, len(text), n):
+        vec = np.array([A2I[c] for c in text[i:i+n]])
+        res = (key_matrix @ vec) % 26
+        cipher_chunk = ''.join(I2A[int(x)] for x in res)
+        out += cipher_chunk
+        rows.append({"Plain Vector": vec.tolist(), "After Multiply": (key_matrix @ vec).tolist(), "Mod 26": res.tolist(), "Cipher": cipher_chunk})
+    return out, pd.DataFrame(rows)
+
+def hill_decrypt(cipher, key_matrix):
+    n = key_matrix.shape[0]
+    cipher = ''.join(c for c in cipher.upper() if c.isalpha())
+    inv_key = matrix_mod_inverse(key_matrix)
+    out = ''
+    rows = []
+    for i in range(0, len(cipher), n):
+        vec = np.array([A2I[c] for c in cipher[i:i+n]])
+        res = (inv_key @ vec) % 26
+        plain_chunk = ''.join(I2A[int(x)] for x in res)
+        out += plain_chunk
+        rows.append({"Cipher Vector": vec.tolist(), "After Multiply": (inv_key @ vec).tolist(), "Mod 26": res.tolist(), "Plain": plain_chunk})
+    return out.rstrip('X'), pd.DataFrame(rows)
 
 # ====================== ROTOR CIPHER ======================
 def make_rotor(seed=None):
@@ -138,36 +368,38 @@ def rotor_decrypt(cipher, rotors, initial_pos=None):
 
 # ====================== STREAMLIT UI ======================
 st.title("🔐 Cryptographic Algorithms Explorer")
-st.markdown("Explore **Caesar**, **Affine**, and **Rotor (Enigma-style)** ciphers with full step-by-step breakdowns.")
+st.markdown("Explore classical ciphers with encryption, decryption, and step-by-step breakdowns.")
 
-tab1, tab2, tab3 = st.tabs(["Caesar Cipher", "Affine Cipher", "Rotor Cipher"])
+tabs = st.tabs(["Caesar", "Affine", "Vigenère", "Rail Fence", "Row Transposition", "Playfair", "Hill", "Rotor"])
 
 # ------------------- TAB 1: CAESAR -------------------
-with tab1:
+with tabs[0]:
     st.header("Caesar Cipher")
+    caesar_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="caesar_mode")
     col1, col2 = st.columns([3, 1])
     with col1:
-        caesar_text = st.text_area("Enter text", "Hasnaat", height=100, key="caesar_text")
+        caesar_text = st.text_area("Text", "Hasnaat", height=100, key="caesar_text")
     with col2:
         caesar_shift = st.slider("Shift (1–25)", 1, 25, 3, key="caesar_shift")
 
-    if st.button("Run Caesar Cipher", key="run_caesar"):
+    if st.button("Run", key="run_caesar"):
         if not caesar_text.strip():
-            st.warning("Please enter some text.")
+            st.warning("Enter text.")
         else:
-            encrypted = caesar_encrypt(caesar_text, caesar_shift)
-            decrypted = caesar_decrypt(encrypted, caesar_shift)
-
-            st.success(f"**Encrypted:** `{encrypted}`")
-            st.info(f"**Decrypted:** `{decrypted}`")
-
-            steps_df = caesar_steps(encrypted, caesar_shift)
-            if not steps_df.empty:
-                st.markdown("#### Step-by-Step Decryption")
-                st.dataframe(steps_df, use_container_width=True)
+            if caesar_mode == "Encrypt":
+                result = caesar_encrypt(caesar_text, caesar_shift)
+                st.success(f"**Ciphertext:** `{result}`")
+                steps = caesar_steps(caesar_text, caesar_shift, mode="encrypt")
+            else:
+                result = caesar_decrypt(caesar_text, caesar_shift)
+                st.success(f"**Plaintext:** `{result}`")
+                steps = caesar_steps(caesar_text, caesar_shift, mode="decrypt")
+            if not steps.empty:
+                st.markdown("#### Steps")
+                st.dataframe(steps, use_container_width=True)
 
 # ------------------- TAB 2: AFFINE -------------------
-with tab2:
+with tabs[1]:
     st.header("Affine Cipher")
     affine_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="affine_mode")
     col1, col2 = st.columns(2)
@@ -177,57 +409,177 @@ with tab2:
         affine_a = st.number_input("Key 'a' (coprime with 26)", min_value=1, value=3, key="affine_a")
         affine_b = st.number_input("Key 'b'", min_value=0, value=5, key="affine_b")
 
-    if st.button("Run Affine Cipher", key="run_affine"):
+    if st.button("Run", key="run_affine"):
         if not affine_msg.strip():
-            st.warning("Please enter a message.")
+            st.warning("Enter message.")
         elif gcd(affine_a, 26) != 1:
-            st.error(f"Error: `a={affine_a}` is **not coprime** with 26. GCD = {gcd(affine_a, 26)}. Choose from: 1, 3, 5, 7, 9, 11, 15, 17, 19, 21, 23, 25.")
+            st.error(f"`a={affine_a}` not coprime with 26.")
         else:
             if affine_mode == "Encrypt":
-                cipher, steps = affine_encrypt(affine_msg, affine_a, affine_b)
-                st.success(f"**Ciphertext:** `{cipher}`")
-                st.markdown("#### Encryption Steps")
-                st.dataframe(steps, use_container_width=True)
+                result, steps = affine_encrypt(affine_msg, affine_a, affine_b)
+                st.success(f"**Ciphertext:** `{result}`")
             else:
-                try:
-                    plain, steps = affine_decrypt(affine_msg, affine_a, affine_b)
-                    st.success(f"**Recovered Plaintext:** `{plain}`")
-                    st.markdown("#### Decryption Steps")
-                    st.dataframe(steps, use_container_width=True)
-                except Exception as e:
-                    st.error(str(e))
+                result, steps = affine_decrypt(affine_msg, affine_a, affine_b)
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Steps")
+            st.dataframe(steps, use_container_width=True)
 
-# ------------------- TAB 3: ROTOR -------------------
-with tab3:
-    st.header("Rotor Cipher (Enigma Simulation)")
+# ------------------- TAB 3: VIGENÈRE -------------------
+with tabs[2]:
+    st.header("Vigenère Cipher")
+    vigenere_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="vigenere_mode")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        vigenere_text = st.text_area("Text", "Hasnaat", height=100, key="vigenere_text")
+    with col2:
+        vigenere_key = st.text_input("Key (word)", "KEY", key="vigenere_key")
+
+    if st.button("Run", key="run_vigenere"):
+        if not vigenere_text.strip():
+            st.warning("Enter text.")
+        elif not vigenere_key.strip():
+            st.warning("Enter key.")
+        else:
+            if vigenere_mode == "Encrypt":
+                result, steps = vigenere_encrypt(vigenere_text, vigenere_key)
+                st.success(f"**Ciphertext:** `{result}`")
+            else:
+                result, steps = vigenere_decrypt(vigenere_text, vigenere_key)
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Steps")
+            st.dataframe(steps, use_container_width=True)
+
+# ------------------- TAB 4: RAIL FENCE -------------------
+with tabs[3]:
+    st.header("Rail Fence Cipher")
+    rail_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="rail_mode")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        rail_text = st.text_area("Text", "Hasnaat", height=100, key="rail_text")
+    with col2:
+        rail_rails = st.number_input("Rails", min_value=2, value=3, key="rail_rails")
+
+    if st.button("Run", key="run_rail"):
+        if not rail_text.strip():
+            st.warning("Enter text.")
+        else:
+            if rail_mode == "Encrypt":
+                result, steps = rail_fence_encrypt(rail_text, rail_rails)
+                st.success(f"**Ciphertext:** `{result}`")
+            else:
+                result, steps = rail_fence_decrypt(rail_text, rail_rails)
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Rail Grid")
+            st.dataframe(steps, use_container_width=True)
+
+# ------------------- TAB 5: ROW TRANSPOSITION -------------------
+with tabs[4]:
+    st.header("Row Transposition Cipher")
+    row_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="row_mode")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        row_text = st.text_area("Text", "Hasnaat", height=100, key="row_text")
+    with col2:
+        row_key = st.text_input("Key (word)", "KEY", key="row_key")
+
+    if st.button("Run", key="run_row"):
+        if not row_text.strip():
+            st.warning("Enter text.")
+        elif not row_key.strip() or len(set(row_key)) != len(row_key):
+            st.warning("Enter unique key letters.")
+        else:
+            if row_mode == "Encrypt":
+                result, steps = row_transposition_encrypt(row_text, row_key.upper())
+                st.success(f"**Ciphertext:** `{result}`")
+            else:
+                result, steps = row_transposition_decrypt(row_text, row_key.upper())
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Grid (Columns by Key)")
+            st.dataframe(steps, use_container_width=True)
+
+# ------------------- TAB 6: PLAYFAIR -------------------
+with tabs[5]:
+    st.header("Playfair Cipher")
+    playfair_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="playfair_mode")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        playfair_text = st.text_area("Text", "Hasnaat", height=100, key="playfair_text")
+    with col2:
+        playfair_key = st.text_input("Key (word)", "PLAYFAIR", key="playfair_key")
+
+    if st.button("Run", key="run_playfair"):
+        if not playfair_text.strip():
+            st.warning("Enter text.")
+        else:
+            if playfair_mode == "Encrypt":
+                result, steps, matrix_df = playfair_encrypt(playfair_text, playfair_key)
+                st.success(f"**Ciphertext:** `{result}`")
+            else:
+                result, steps, matrix_df = playfair_decrypt(playfair_text, playfair_key)
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Matrix")
+            st.dataframe(matrix_df, use_container_width=True)
+            st.markdown("#### Steps")
+            st.dataframe(steps, use_container_width=True)
+
+# ------------------- TAB 7: HILL -------------------
+with tabs[6]:
+    st.header("Hill Cipher")
+    hill_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="hill_mode")
+    hill_text = st.text_area("Text", "PAYMOREMONEY", height=100, key="hill_text")
+    hill_n = st.number_input("Matrix Size (n x n)", min_value=2, max_value=4, value=2, key="hill_n")
+    st.markdown("Enter Key Matrix (row-wise, space-separated integers)")
+    hill_key_str = st.text_input("Key Matrix", "6 24 1 13", key="hill_key")  # Example for 2x2
+    if st.button("Run", key="run_hill"):
+        if not hill_text.strip():
+            st.warning("Enter text.")
+        else:
+            try:
+                key_list = list(map(int, hill_key_str.split()))
+                if len(key_list) != hill_n ** 2:
+                    raise ValueError(f"Enter {hill_n**2} numbers.")
+                key_matrix = np.array(key_list).reshape(hill_n, hill_n)
+                if hill_mode == "Encrypt":
+                    result, steps = hill_encrypt(hill_text, key_matrix)
+                    st.success(f"**Ciphertext:** `{result}`")
+                else:
+                    result, steps = hill_decrypt(hill_text, key_matrix)
+                    st.success(f"**Plaintext:** `{result}`")
+                st.markdown("#### Key Matrix")
+                st.dataframe(pd.DataFrame(key_matrix), use_container_width=True)
+                st.markdown("#### Steps")
+                st.dataframe(steps, use_container_width=True)
+            except Exception as e:
+                st.error(str(e))
+
+# ------------------- TAB 8: ROTOR -------------------
+with tabs[7]:
+    st.header("Rotor Machine (Enigma Simulation)")
     rotor_mode = st.radio("Mode", ["Encrypt", "Decrypt"], horizontal=True, key="rotor_mode")
     col1, col2 = st.columns([3, 1])
     with col1:
         rotor_text = st.text_area("Text", "ATIFASLAM", height=100, key="rotor_text")
     with col2:
-        num_rotors = st.number_input("Number of Rotors", min_value=1, max_value=4, value=2, key="num_rotors")
+        num_rotors = st.number_input("Rotors", min_value=1, max_value=4, value=2, key="num_rotors")
 
-    if st.button("Run Rotor Cipher", key="run_rotor"):
+    if st.button("Run", key="run_rotor"):
         if not rotor_text.strip():
-            st.warning("Please enter text.")
+            st.warning("Enter text.")
         else:
             rotors = [make_rotor(seed=i+1) for i in range(num_rotors)]
-            with st.expander("Rotor Wiring (Click to view)", expanded=False):
+            with st.expander("Rotor Wiring", expanded=False):
                 for i, r in enumerate(rotors, 1):
                     st.write(f"**Rotor {i}:** `{r}`")
-
             if rotor_mode == "Encrypt":
-                cipher, steps, final_pos = rotor_encrypt(rotor_text, rotors)
-                st.success(f"**Ciphertext:** `{cipher}`")
+                result, steps, final_pos = rotor_encrypt(rotor_text, rotors)
+                st.success(f"**Ciphertext:** `{result}`")
             else:
-                plain, steps, final_pos = rotor_decrypt(rotor_text, rotors)
-                st.success(f"**Recovered Plaintext:** `{plain}`")
-
-            st.markdown("#### Step-by-Step Rotor Log")
+                result, steps, final_pos = rotor_decrypt(rotor_text, rotors)
+                st.success(f"**Plaintext:** `{result}`")
+            st.markdown("#### Steps Log")
             st.dataframe(steps, use_container_width=True)
-
-            st.caption(f"Final rotor positions: {final_pos}")
+            st.caption(f"Final Positions: {final_pos}")
 
 # ====================== FOOTER ======================
 st.markdown("---")
-st.caption("Built with ❤️ using Streamlit | Inspired by classical cryptography")
+st.caption("Built with ❤️ using Streamlit | Classical Ciphers Collection")
