@@ -1,4 +1,4 @@
-# 🔐 CryptoLab - Classical Cryptographic Algorithms
+# 🔐 CryptoLab 
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cryptographic-algos-rr5mktwx7bgusaalmiqctp.streamlit.app/)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
